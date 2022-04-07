@@ -1,4 +1,4 @@
-import * as THREE from 'https://cdn.skypack.dev/pin/three@v0.137.0-X5O2PK3x44y1WRry67Kr/mode=imports/optimized/three.js';
+import * as THREE from 'https://cdn.skypack.dev/three@0.138.0';
 const EffectShader = {
 
     uniforms: {
@@ -15,7 +15,11 @@ const EffectShader = {
         'boxSize': { value: new THREE.Vector3() },
         'bias': { value: 0.0 },
         'samples': { value: 0.0 },
-        'fogColor': { value: new THREE.Vector3() }
+        'mindex': { value: 0.0 },
+        'lightAbsorption': { value: 5.0 },
+        'thickness': { value: 5.0 },
+        'fogColor': { value: new THREE.Vector3() },
+        'lightDir': { value: new THREE.Vector3(0, 1, 0) }
     },
 
     vertexShader: /* glsl */ `
@@ -37,9 +41,13 @@ const EffectShader = {
         uniform float time;
         uniform float bias;
         uniform float samples;
+        uniform float mindex;
         uniform vec3 boxCenter;
         uniform vec3 boxSize;
         uniform vec3 fogColor;
+        uniform float thickness;
+        uniform float lightAbsorption;
+        uniform vec3 lightDir;
         varying vec2 vUv;
         float linearize_depth(float d,float zNear,float zFar)
         {
@@ -201,9 +209,18 @@ float sdBox( vec3 p, vec3 c, vec3 b )
   vec3 q = abs(p) - b;
   return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
 }
+vec4 textureMindex(sampler3D tex, vec3 coord) {
+  if (mindex == 0.0) {
+    return texture(tex, vec3(coord.z, coord.y, coord.x));
+  } else if (mindex == 1.0) {
+    return texture(tex, vec3(coord.x, coord.z, coord.y));
+  } else if (mindex == 2.0) {
+    return texture(tex, vec3(coord.x, coord.y, coord.z));
+  }
+}
         float sampleDensity(vec3 pos) {
             //float density = max(snoise(vec4(0.025 * pos  + vec3(time * 0.1, 0.0, time * 0.1), time * 0.1)) * 0.5 + 0.5 - 0.5, 0.0);
-            float density = max(texture(volumeTexture, vec3((pos.x + (boxSize.x / 2.0) - boxCenter.x) / boxSize.x, (pos.y + (boxSize.y / 2.0) - boxCenter.y) / boxSize.y, (pos.z + (boxSize.z / 2.0) - boxCenter.z) / boxSize.z )).r - 0.5 + bias, 0.0);
+            float density = max(textureMindex(volumeTexture, vec3((pos.x + (boxSize.x / 2.0) - boxCenter.x) / boxSize.x, (pos.y + (boxSize.y / 2.0) - boxCenter.y) / boxSize.y, (pos.z + (boxSize.z / 2.0) - boxCenter.z) / boxSize.z )).r - 0.5 + bias, 0.0);
             float falloff = sdBox(pos, boxCenter, boxSize / 2.0);
             return density * clamp(1.0 - exp(0.05 * falloff), 0.0, 1.0);
         }
@@ -219,21 +236,28 @@ float sdBox( vec3 p, vec3 c, vec3 b )
             float distInsideBox = boxIntersectionInfo.y;
             bool intersectsBox =  distInsideBox > 0.0 && distToBox < linDepth - 0.1;
             gl_FragColor = vec4(diffuse.rgb, 1.0);
+            float incidentLight = 1.0;
             if (intersectsBox) {
                 vec3 startPos = cameraPos + distToBox * rayDir;
                 vec3 endPos = cameraPos + (distToBox + min(linDepth - distToBox, distInsideBox)) * rayDir;
                 vec3 currPos = startPos;
                 float steps = samples;
                 float density = 0.0;
+                float stepWeight = 1.0 / steps;
+                float sampleNorm = 100.0 / samples;
+                vec3 normLightDir = lightDir;
                 for(float i = 0.0; i <= steps; i++) {
                     currPos = mix(startPos, endPos, i / steps);
-                    density += sampleDensity(currPos);
+                    float currView = (1.0 - 10.0 * density / (i + 1.0));
+                    float d = sampleDensity(currPos);
+                    density += d * stepWeight;
+                    incidentLight -= sampleNorm * lightAbsorption * exp(-100.0 * density) * d * sampleDensity(currPos + thickness * normLightDir);
                     if (length(currPos - cameraPos) > linDepth - 1.0) {
                         break;
                     }
                 }
-                density /= steps;
-                gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, clamp(1.0 -exp(-100.0 * density), 0.0, 1.0));
+                //density /= steps;
+                gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor * clamp(incidentLight, 0.0, 1.0), clamp(1.0 - exp(-100.0 * density), 0.0, 1.0));
             }
             //gl_FragColor.rgb = vec3(texture(volumeTexture, vec3(vUv.x, time * 0.1, vUv.y)).r);
 		}`
