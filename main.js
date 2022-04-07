@@ -139,6 +139,7 @@ async function main() {
         resolution: 1,
         thickness: 5,
         lightAbsorption: 5,
+        gizmo: true,
         Mode: 'Translate'
     };
     const gui = new GUI();
@@ -160,6 +161,7 @@ async function main() {
     gui.add(effectController, "lightDirY", -1, 1, 0.001).name("Light Y Direction");
     gui.add(effectController, "lightDirZ", -1, 1, 0.001).name("Light Z Direction");
     const transformModes = gui.addFolder('Transform Modes');
+    transformModes.add(effectController, "gizmo").name("Gizmo");
     transformModes.add(effectController, "Mode").options(["Translate", "Scale"]);
     transformModes.open();
     //gui.add(effectController, 'lightStrength', 0, 1, 0.001).name("Light Strength");
@@ -264,6 +266,8 @@ async function main() {
         }
         lastBoxSize = boxSize.clone();
         lastResolution = effectController.resolution;
+        transformControl.visible = effectController.gizmo;
+        transformControl.enabled = effectController.gizmo;
         fsQuad.material.uniforms.scale.value = effectController.scale;
         fsQuad.material.uniforms.octaves.value = effectController.octaves;
         fsQuad.material.uniforms.lacunarity.value = effectController.lacunarity;
